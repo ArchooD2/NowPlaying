@@ -11,7 +11,8 @@ setup(
         "numpy",
         "sounddevice",
         "matplotlib",
-        "mutagen"
+        "mutagen",
+        "blessed",
     ],
     entry_points={
         "console_scripts": [
