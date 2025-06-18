@@ -3,9 +3,28 @@ import time
 import threading
 import sounddevice as sd
 import numpy as np
-import matplotlib.pyplot as plt
 from mutagen import File as MutagenFile
 from .utils import load_audio
+
+BLOCKS = " ▁▂▃▄▅▆▇█"  # Unicode blocks from low to high
+
+def render_waveform_vertical(chunk, width=80, height=8):
+    if len(chunk) == 0:
+        return [" " * width for _ in range(height)]
+
+    # Downsample to terminal width
+    step = max(1, len(chunk) // width)
+    sampled = np.abs(chunk[:step * width].reshape(-1, step).mean(axis=1))
+    norm = sampled / np.max(sampled) if np.max(sampled) > 0 else sampled
+    levels = (norm * (height - 1)).astype(int)
+
+    # Generate vertical bars (top-down lines)
+    rows = []
+    for row in reversed(range(height)):
+        line = ''.join("█" if level >= row else " " for level in levels)
+        rows.append(line)
+    return rows
+
 
 def print_metadata(filepath):
     meta = MutagenFile(filepath, easy=True)
@@ -16,21 +35,17 @@ def print_metadata(filepath):
     for k, v in meta.items():
         print(f"  {k}: {v}")
 
-def plot_waveform(y, sr, cursor_sample):
-    plt.clf()
-    window = sr  # 1 second window
-    start = max(0, cursor_sample - window // 2)
-    end = min(len(y), start + window)
-    plt.plot(np.arange(start, end) / sr, y[start:end])
-    plt.axvline(cursor_sample / sr, color='r', linestyle='--')
-    plt.xlabel("Time (s)")
-    plt.ylabel("Amplitude")
-    plt.title("Waveform (red = current position)")
-    plt.tight_layout()
-    plt.pause(0.01)
-
 def play_and_visualize(filepath):
     y, sr = load_audio(filepath, mono=True)
+    print("\033[H\033[J", end="")
+    # Validate sample rate for sounddevice
+    try:
+        sd.check_output_settings(samplerate=sr, channels=1)
+    except sd.PortAudioError as e:
+        print(f"Warning: Sample rate {sr} not supported. Falling back to 44100 Hz.")
+        sr = 44100
+        y, _ = load_audio(filepath, sr=sr, mono=True)
+
     if y.size == 0:
         print("Failed to load audio.")
         return
@@ -38,9 +53,6 @@ def play_and_visualize(filepath):
     print_metadata(filepath)
     duration = len(y) / sr
     print(f"Duration: {duration:.2f} seconds\n")
-
-    plt.ion()
-    fig = plt.figure(figsize=(8, 3))
 
     blocksize = 1024
     cursor = [0]
@@ -60,20 +72,38 @@ def play_and_visualize(filepath):
     stream = sd.OutputStream(
         samplerate=sr, channels=1, callback=callback, blocksize=blocksize
     )
-
+    meta_shown = False
+    print("\033[H\033[J", end="")
     with stream:
         while cursor[0] < len(y):
             elapsed = cursor[0] / sr
-            print(f"\rElapsed: {elapsed:.2f}s / {duration:.2f}s", end="")
-            plot_waveform(y, sr, cursor[0])
-            plt.gcf().canvas.flush_events()
+            end = min(cursor[0] + sr // 10, len(y))  # 0.1s chunk for visual
+            chunk = y[cursor[0]:end]
+            bars = render_waveform_vertical(chunk, width=60, height=8)
+            print("\033[H" * 9)  # Move cursor up 9 lines (8 waveform + 1 elapsed line)
+            for line in bars:
+                print(f"│{line}")
+            print(f"└ Elapsed: {elapsed:.2f}s / {duration:.2f}s".ljust(80))
+            if not meta_shown:
+                desired_keys = ["title", "artist", "album", "copyright"]
+                meta = MutagenFile(filepath, easy=True)
+                if meta:
+                    for key in desired_keys:
+                        value = meta.get(key)
+                        if value:
+                            print(f"  {key}: {value[0]}")
+                else:
+                    print("  No metadata found.")
+                meta_shown = True
+                print("\033[H" * (len(meta))) # Move cursor back up.
             time.sleep(0.05)
     print("\nPlayback finished.")
-    plt.ioff()
-    plt.show()
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python audio_player_cli.py <audiofile>")
         sys.exit(1)
-    play_and_visualize(sys.argv[1])
+    try:
+        play_and_visualize(sys.argv[1])
+    except KeyboardInterrupt:
+        print("\033[H\033[J", end="")
