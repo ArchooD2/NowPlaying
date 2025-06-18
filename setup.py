@@ -15,7 +15,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "nowplaying=nowplaying.play:play_and_visualize"
+            "nowplaying=nowplaying.play:main"
         ]
     },
     python_requires=">=3.7",

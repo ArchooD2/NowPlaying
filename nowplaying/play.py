@@ -99,11 +99,14 @@ def play_and_visualize(filepath):
             time.sleep(0.05)
     print("\nPlayback finished.")
 
-if __name__ == "__main__":
+def main():
     if len(sys.argv) < 2:
-        print("Usage: python audio_player_cli.py <audiofile>")
+        print("Usage: python play.py <audiofile>")
         sys.exit(1)
     try:
         play_and_visualize(sys.argv[1])
     except KeyboardInterrupt:
         print("\033[H\033[J", end="")
+
+if __name__ == "__main__":
+    main()
