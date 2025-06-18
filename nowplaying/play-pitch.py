@@ -60,9 +60,9 @@ def render_spectrum_vertical(chunk,
                 elif row > height/3:   color = 3
                 elif row > 1:          color = 46
                 else:                  color = 22
-                line += f'\033[38;5;{color}m███'
+                line += f'\033[38;5;{color}m██'
             else:
-                line += '   '
+                line += '  '
         rows.append(line + '\033[0m')
     return rows
 
@@ -129,7 +129,7 @@ def play_and_visualize(filepath):
     hop    = sr // 10        # 0.1s chunks
     fps    = 120             # you can set this as you like
     frames = int(np.ceil(duration * fps))
-
+    meta_shown = False
     with stream:
         start_time = time.time()
         for frame in range(frames):
@@ -151,6 +151,9 @@ def play_and_visualize(filepath):
             for line in bars:
                 print(f"│{line}")
             print(f"└ Elapsed: {elapsed:.2f}s / {duration:.2f}s".ljust(80))
+            if not meta_shown:
+                print_metadata(filepath)
+                meta_shown = True
 
             # wait for next frame tick
             next_tick = start_time + (frame + 1) / fps
