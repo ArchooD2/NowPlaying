@@ -15,7 +15,8 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "nowplaying=nowplaying.play:main"
+            "nowplaying-peak=nowplaying.play-peak:main",
+            "nowplaying-pitch=nowplaying.play-pitch:main"
         ]
     },
     python_requires=">=3.7",

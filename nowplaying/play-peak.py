@@ -8,7 +8,7 @@ from .utils import load_audio
 
 BLOCKS = " ▁▂▃▄▅▆▇█"  # Unicode blocks from low to high
 
-def render_waveform_vertical(chunk, width=80, height=8):
+def render_waveform_vertical(chunk, width=160, height=8):
     if len(chunk) == 0:
         return [" " * width for _ in range(height)]
 
@@ -21,8 +21,11 @@ def render_waveform_vertical(chunk, width=80, height=8):
     # Generate vertical bars (top-down lines)
     rows = []
     for row in reversed(range(height)):
-        line = ''.join("█" if level >= row else " " for level in levels)
-        rows.append(line)
+        line = ''.join(
+            f'\033[38;5;{160 if row > height/1.2 else 166 if row > height/1.7 else 3 if row > height/3 else 46 if row > 1 else 22}m███' if level >= row else '   '
+            for level in levels
+        )
+        rows.append(line + '\033[0m')  # Reset color at end of line
     return rows
 
 
@@ -79,7 +82,7 @@ def play_and_visualize(filepath):
             elapsed = cursor[0] / sr
             end = min(cursor[0] + sr // 10, len(y))  # 0.1s chunk for visual
             chunk = y[cursor[0]:end]
-            bars = render_waveform_vertical(chunk, width=60, height=8)
+            bars = render_waveform_vertical(chunk, width=60, height=18)
             print("\033[H" * 9)  # Move cursor up 9 lines (8 waveform + 1 elapsed line)
             for line in bars:
                 print(f"│{line}")
@@ -96,7 +99,7 @@ def play_and_visualize(filepath):
                     print("  No metadata found.")
                 meta_shown = True
                 print("\033[H" * (len(meta))) # Move cursor back up.
-            time.sleep(0.05)
+            #time.sleep(0.07)
     print("\nPlayback finished.")
 
 def main():
@@ -107,6 +110,9 @@ def main():
         play_and_visualize(sys.argv[1])
     except KeyboardInterrupt:
         print("\033[H\033[J", end="")
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
