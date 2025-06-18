@@ -1,115 +1,71 @@
-#!/usr/bin/env python3
 import sys
 import time
-
-import sounddevice as sd
 import numpy as np
+import sounddevice as sd
 from mutagen import File as MutagenFile
+from blessed import Terminal
 
 from .utils import load_audio
+fast = False
+pretty = False
+BLOCKS = " ▁▂▃▄▅▆▇█"  # Optional
 
-BLOCKS = " ▁▂▃▄▅▆▇█"  # Unicode blocks from low to high
+def get_metadata(filepath):
+    desired_keys = ["title", "artist", "album", "copyright"]
+    meta = MutagenFile(filepath, easy=True)
+    metadata = {}
+    if meta:
+        for key in desired_keys:
+            value = meta.get(key)
+            if value:
+                metadata[key] = value[0]
+    return metadata
 
-def render_spectrum_vertical(chunk,
-                             width=160, height=8,
-                             sr=44100,
-                             floor_db=-60.0,
-                             f_min=20.0,
-                             ref=1.0):
-    """
-    Log-spaced FFT → peak band energies → dB relative to `ref` → floor/normalize → ANSI bars.
-    """
+def render_spectrum_bars(chunk, width=60, height=18, sr=44100, floor_db=-60.0, f_min=20.0, ref=1.0):
     if len(chunk) == 0:
-        return ['   ' * width for _ in range(height)]
+        return [0] * width
 
-    # 1) FFT + freqs
     w     = np.hanning(len(chunk))
     spec  = np.abs(np.fft.rfft(chunk * w))
     freqs = np.fft.rfftfreq(len(chunk), 1.0 / sr)
-
-    # 2) log-spaced band edges
     f_max = sr / 2
-    edges = np.logspace(np.log10(f_min), np.log10(f_max), num=width+1)
+    edges = np.logspace(np.log10(f_min), np.log10(f_max), num=width + 1)
 
-    # 3) **peak** per-band instead of mean
     bands = []
     for i in range(width):
-        lo, hi = edges[i], edges[i+1]
+        lo, hi = edges[i], edges[i + 1]
         idx    = np.where((freqs >= lo) & (freqs < hi))[0]
-        if idx.size:
-            bands.append(spec[idx].max())
-        else:
-            bands.append(0.0)
+        bands.append(spec[idx].max() if idx.size else 0.0)
 
-    # 4) to dB relative to file-peak `ref`
     mags_db = 20 * np.log10(np.array(bands) / (ref + 1e-9) + 1e-9)
-
-    # 5) clamp & normalize
     mags_db = np.clip(mags_db, floor_db, None)
     norm    = (mags_db - floor_db) / (-floor_db)
-    levels  = (norm * (height - 1)).astype(int)
-
-    # 6) render rows top→bottom
-    rows = []
-    for row in reversed(range(height)):
-        line = ''
-        for lvl in levels:
-            if lvl >= row:
-                if   row > height/1.2: color = 160
-                elif row > height/1.7: color = 166
-                elif row > height/3:   color = 3
-                elif row > 1:          color = 46
-                else:                  color = 22
-                line += f'\033[38;5;{color}m██'
-            else:
-                line += '  '
-        rows.append(line + '\033[0m')
-    return rows
-
-def print_metadata(filepath):
-    desired_keys = ["title", "artist", "album", "copyright"]
-    meta = MutagenFile(filepath, easy=True)
-    if not meta:
-        print("No metadata found.")
-        return
-    print("Metadata:")
-    for key in desired_keys:
-        value = meta.get(key)
-        if value:
-            print(f"  {key}: {value[0]}")
+    levels  = (norm * height).astype(int)
+    return levels
 
 def play_and_visualize(filepath):
-    # 1) load audio
+    term = Terminal()
     y, sr = load_audio(filepath, mono=True)
-    print("\033[H\033[J", end="")
+    if y.size == 0:
+        print(term.red("Failed to load audio."))
+        return
 
-    # 2) ensure sample rate
     try:
         sd.check_output_settings(samplerate=sr, channels=1)
     except sd.PortAudioError:
-        print(f"Warning: Sample rate {sr} not supported. Falling back to 44100 Hz.")
         sr = 44100
         y, _ = load_audio(filepath, sr=sr, mono=True)
 
-    if y.size == 0:
-        print("Failed to load audio.")
-        return
-
-    # 3) compute global-peak FFT once
     window        = np.hanning(len(y))
     full_spectrum = np.abs(np.fft.rfft(y * window))
     file_peak     = np.percentile(full_spectrum, 90)
+    duration      = len(y) / sr
+    metadata      = get_metadata(filepath)
 
-    # 4) print metadata & duration
-    print_metadata(filepath)
-    duration = len(y) / sr
-    print(f"Duration: {duration:.2f} seconds\n")
-
-    # 5) prepare audio callback
     blocksize = 1024
     def callback(outdata, frames, time_info, status):
         idx   = callback.idx
-        chunk = y[idx:idx+frames]
+        chunk = y[idx:idx + frames]
         if len(chunk) < frames:
             outdata[:len(chunk), 0] = chunk
             outdata[len(chunk):, 0] = 0
@@ -118,59 +74,75 @@ def play_and_visualize(filepath):
         callback.idx += frames
     callback.idx = 0
 
-    stream = sd.OutputStream(
-        samplerate=sr,
-        channels=1,
-        callback=callback,
-        blocksize=blocksize
-    )
-
-    # 6) visual loop synced to wall-clock time
-    hop    = sr // 10        # 0.1s chunks
-    fps    = 120             # you can set this as you like
+    hop    = sr // 10
+    fps    = 60 if pretty else 15 if fast else 30
     frames = int(np.ceil(duration * fps))
-    meta_shown = False
-    with stream:
-        start_time = time.time()
-        for frame in range(frames):
-            elapsed = time.time() - start_time
-            idx     = int(elapsed * sr)
-            if idx >= len(y):
-                break
+    spectrum_height = 18
+    spectrum_width  = 60
 
-            chunk = y[idx : idx + hop]
-            bars  = render_spectrum_vertical(
-                chunk,
-                width=60, height=18, sr=sr,
-                floor_db=-60.0, f_min=20.0,
-                ref=file_peak
-            )
+    color_steps = [160, 166, 3, 46, 22]
 
-            # redraw
-            print("\033[H" * 9, end="")
-            for line in bars:
-                print(f"│{line}")
-            print(f"└ Elapsed: {elapsed:.2f}s / {duration:.2f}s".ljust(80))
-            if not meta_shown:
-                print_metadata(filepath)
-                meta_shown = True
+    with sd.OutputStream(samplerate=sr, channels=1, callback=callback, blocksize=blocksize):
+        with term.fullscreen(), term.hidden_cursor():
+            start_time = time.time()
+            for frame in range(frames):
+                elapsed = time.time() - start_time
+                idx = int(elapsed * sr)
+                if idx >= len(y):
+                    break
 
-            # wait for next frame tick
-            next_tick = start_time + (frame + 1) / fps
-            sleep_sec = next_tick - time.time()
-            if sleep_sec > 0:
-                time.sleep(sleep_sec)
+                chunk = y[idx : idx + hop]
+                levels = render_spectrum_bars(chunk, width=spectrum_width, height=spectrum_height, sr=sr, ref=file_peak)
 
-    print("\nPlayback finished.")
+                output_lines = []
+
+                for row in range(spectrum_height):
+                    line = ""
+                    for col, lvl in enumerate(levels):
+                        color_idx = (
+                            4 if row >= spectrum_height * 0.9 else
+                            3 if row >= spectrum_height * 0.7 else
+                            2 if row >= spectrum_height * 0.5 else
+                            1 if row >= spectrum_height * 0.3 else
+                            0
+                        )
+                        color_code = color_steps[color_idx]
+                        char = "█" if spectrum_height - row <= lvl and fast else "███" if spectrum_height - row <= lvl and pretty else "██" if spectrum_height - row <= lvl else " " if fast else "   " if pretty else "  "
+                        if char.strip():
+                            line += term.color(color_code)(char)
+                        else:
+                            line += char
+                    output_lines.append(term.move(row, 0) + line)
+
+                output_lines.append(term.move(spectrum_height, 0) +
+                                    f"└ Elapsed: {elapsed:.2f}s / {duration:.2f}s".ljust(80))
+
+                for i, (key, value) in enumerate(metadata.items()):
+                    output_lines.append(term.move(spectrum_height + 2 + i, 0) + f"{key}: {value}")
+
+                # Combine and flush all at once
+                full_frame = term.move(0, 0) + "".join(output_lines)
+                sys.stdout.write(full_frame)
+                sys.stdout.flush()
+
+                time.sleep(max(0, (start_time + (frame + 1) / fps) - time.time()))
+
+    print(term.move(spectrum_height + 7, 0) + term.green("Playback finished."))
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python play.py <audiofile>")
+        print("Usage: python play_pitch.py <audiofile>")
         sys.exit(1)
     try:
+        if len(sys.argv) > 2 and sys.argv[2] == "--fast":
+            global fast
+            fast = True
+        elif len(sys.argv) > 2 and sys.argv[2] == "--pretty":
+            global pretty
+            pretty = True
         play_and_visualize(sys.argv[1])
     except KeyboardInterrupt:
-        print("\033[H\033[J", end="")
+        print("\nExiting...")
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
