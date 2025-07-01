@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="nowplay",
-    version="0.1.3",
+    version="0.1.5",
     description="CLI tool for playing audio and visualizing waveform with metadata.",
     author="PJ H.",
     author_email="archood2@gmail.com",
