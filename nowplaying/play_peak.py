@@ -11,7 +11,7 @@ from .utils import load_audio
 BLOCKS = " ▁▂▃▄▅▆▇█"
 
 # Default ANSI 256 colors for waveform (bottom to top)
-DEFAULT_COLORS = [160, 166, 3, 46, 22]
+DEFAULT_COLORS = [160, 166, 3, 46, 22][::-1]  # Reverse for top-to-bottom rendering
 color_steps = DEFAULT_COLORS
 
 def render_waveform_vertical(chunk, width=160, height=8):
@@ -37,7 +37,7 @@ def render_waveform_vertical(chunk, width=160, height=8):
                 4 if row >= height * 0.9 else
                 3 if row >= height * 0.7 else
                 2 if row >= height * 0.5 else
-                1 if row >= height * 0.3 else
+                1 if row >= 2 else
                 0
             )
             color = color_steps[color_idx]
