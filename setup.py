@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="nowplaying",
+    name="nowplay",
     version="0.1.3",
     description="CLI tool for playing audio and visualizing waveform with metadata.",
     author="PJ H.",
@@ -16,8 +16,8 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "nowplaying-peak=nowplaying.play_peak:main",
-            "nowplaying-pitch=nowplaying.play_pitch:main",
+            "nowplay-peak=nowplay.play_peak:main",
+            "nowplay-pitch=nowplay.play_pitch:main",
         ]
     },
     python_requires=">=3.7",
